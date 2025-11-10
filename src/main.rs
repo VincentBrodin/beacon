@@ -1,6 +1,5 @@
 use std::{cmp, env, io, sync::Arc, time::Instant};
 
-use iced::{Application, Settings, window::Level};
 use memory_stats::memory_stats;
 use nucleo::{
     Config, Nucleo,
@@ -9,18 +8,15 @@ use nucleo::{
 use pretty_bytes::converter::convert;
 use thiserror::Error;
 
-use crate::{
-    desktop::Desktop,
-    gui::{App, Flags},
-};
+use crate::{app::App, desktop::Desktop};
 
+mod app;
 mod desktop;
-mod gui;
 
 #[derive(Error, Debug)]
 enum Error {
-    #[error("Iced failed: {0}")]
-    Iced(#[from] iced::Error),
+    #[error("Eframe failed: {0}")]
+    Eframe(#[from] eframe::Error),
     #[error("Io failed: {0}")]
     IO(#[from] io::Error),
     #[error("Failed to parse ini: {0}")]
@@ -81,13 +77,16 @@ fn main() -> Result<(), Error> {
         println!("Couldn't get the current memory usage :(");
     }
 
-    // let settings = Settings::with_flags(Flags { nucleo });
-    let mut settings = Settings::with_flags(Flags { nucleo });
-    settings.window.resizable = false;
-    settings.window.decorations = false;
-    settings.window.transparent = true;
-    settings.window.level = Level::AlwaysOnTop;
-
-    App::run(settings)?;
+    let native_options = eframe::NativeOptions {
+        viewport: egui::ViewportBuilder::default()
+            .with_inner_size([400.0, 300.0])
+            .with_min_inner_size([300.0, 220.0]),
+        ..Default::default()
+    };
+    eframe::run_native(
+        "eframe template",
+        native_options,
+        Box::new(|_| Ok(Box::new(App::new(nucleo)))),
+    )?;
     Ok(())
 }

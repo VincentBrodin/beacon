@@ -1,6 +1,7 @@
-use std::{fmt::Display, path::Path, str::FromStr};
+use std::{fmt::Display, fs, io, path::Path, str::FromStr};
 
 use ini::Ini;
+use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Type {
@@ -34,20 +35,20 @@ impl FromStr for Type {
     }
 }
 
-pub struct Application {
+pub struct Desktop {
     pub name: String,
     pub chars: Vec<char>,
     pub app_type: Type,
     pub no_display: bool,
 }
 
-impl Display for Application {
+impl Display for Desktop {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(&self.name)
     }
 }
 
-impl Application {
+impl Desktop {
     pub fn load_from_file<P: AsRef<Path>>(path: P) -> Option<Self> {
         let ini = match Ini::load_from_file(path) {
             Ok(v) => v,
@@ -68,11 +69,33 @@ impl Application {
             .parse()
             .unwrap_or(false);
 
-        Some(Application {
+        Some(Self {
             name,
             chars,
             app_type,
             no_display,
         })
+    }
+
+    pub fn load_from_directory<P: AsRef<Path>>(path: P) -> io::Result<Vec<Self>> {
+        let dir_entries: Vec<_> = fs::read_dir(path)?.filter_map(|entry| entry.ok()).collect();
+        Ok(dir_entries
+            .par_iter()
+            .filter_map(|entry| Self::load_from_file(entry.path()))
+            .filter(|app| !app.no_display)
+            .collect())
+    }
+
+    pub fn for_each_in_directory<P: AsRef<Path>, OP: Fn(Self) + Sync + Send>(
+        path: P,
+        op: OP,
+    ) -> io::Result<()> {
+        let dir_entries: Vec<_> = fs::read_dir(path)?.filter_map(|entry| entry.ok()).collect();
+        dir_entries
+            .par_iter()
+            .filter_map(|entry| Self::load_from_file(entry.path()))
+            .filter(|app| !app.no_display)
+            .for_each(op);
+        Ok(())
     }
 }

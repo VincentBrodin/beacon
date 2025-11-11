@@ -5,14 +5,14 @@ use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Type {
-    Application,
+    Application(Option<String>),
     Link(String),
     Directory,
 }
 impl Display for Type {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Type::Application => f.write_str("Application"),
+            Type::Application(_) => f.write_str("Application"),
             Type::Link(_) => f.write_str("Link"),
             Type::Directory => f.write_str("Directory"),
         }
@@ -27,7 +27,7 @@ impl FromStr for Type {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "Application" => Ok(Type::Application),
+            "Application" => Ok(Type::Application(None)),
             "Link" => Ok(Type::Link(String::from(""))),
             "Directory" => Ok(Type::Directory),
             _ => Err(ParseTypeError),
@@ -38,7 +38,7 @@ impl FromStr for Type {
 pub struct Desktop {
     pub name: String,
     pub chars: Vec<char>,
-    pub app_type: Type,
+    pub entry_type: Type,
     pub no_display: bool,
 }
 
@@ -59,9 +59,15 @@ impl Desktop {
         let name = desktop_entry.get("Name")?.to_string();
         let chars: Vec<char> = name.chars().collect();
         let mut app_type = Type::from_str(desktop_entry.get("Type")?).ok()?;
-        if app_type == Type::Link(String::from("")) {
-            let link = desktop_entry.get("Name")?.to_string();
-            app_type = Type::Link(link);
+        match app_type {
+            Type::Application(_) => {
+                app_type = Type::Application(desktop_entry.get("Exec").map(|val| val.to_string()));
+            }
+            Type::Link(_) => {
+                let link = desktop_entry.get("Name")?.to_string();
+                app_type = Type::Link(link);
+            }
+            Type::Directory => todo!(),
         }
         let no_display: bool = desktop_entry
             .get("NoDisplay")
@@ -72,7 +78,7 @@ impl Desktop {
         Some(Self {
             name,
             chars,
-            app_type,
+            entry_type: app_type,
             no_display,
         })
     }

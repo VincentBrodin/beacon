@@ -1,7 +1,7 @@
-use std::cmp;
+use std::process::Command;
 
 use egui::{Align, CentralPanel, Key, Layout, TextEdit};
-use nucleo::Nucleo;
+use nucleo::{Item, Nucleo};
 
 use crate::desktop::Desktop;
 
@@ -37,23 +37,56 @@ impl eframe::App for App {
             self.selected = 0;
         }
         self.nucleo.tick(16);
-        let snapshot = self.nucleo.snapshot();
 
         CentralPanel::default().show(ctx, |ui| {
+            let snapshot = self.nucleo.snapshot();
+            let matched_count = snapshot.matched_item_count();
             ctx.input(|i| {
                 if i.key_pressed(Key::Tab) {
                     if i.modifiers.shift {
                         if self.selected == 0 {
-                            self.selected = snapshot.matched_item_count() as usize - 1;
+                            self.selected = matched_count as usize - 1;
                         } else {
                             self.selected -= 1;
                         }
                     } else {
-                        if self.selected + 1 >= snapshot.matched_item_count() as usize {
+                        if self.selected + 1 >= matched_count as usize {
                             self.selected = 0;
                         } else {
                             self.selected += 1;
                         }
+                    }
+                } else if i.key_pressed(Key::Enter) {
+                    let selected = self.selected as u32;
+                    let items: Vec<_> = self
+                        .nucleo
+                        .snapshot()
+                        .matched_items(selected..selected + 1)
+                        .collect();
+                    match items.first() {
+                        Some(item) => {
+                            println!("User selected {}", item.data.name);
+                            match &item.data.entry_type {
+                                crate::desktop::Type::Application(exec) => match exec {
+                                    Some(exec) => {
+                                        println!("Should execute {}", exec);
+                                        // let result = Command::new(exec).output();
+                                        // match result {
+                                        //     Ok(output) => println!(
+                                        //         "{} succseded with code {}",
+                                        //         exec, output.status
+                                        //     ),
+                                        //     Err(err) => println!("{} failed: {}", exec, err),
+                                        // }
+                                        ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                                    }
+                                    None => println!("App does not have an executable link"),
+                                },
+                                crate::desktop::Type::Link(_) => todo!(),
+                                crate::desktop::Type::Directory => todo!(),
+                            }
+                        }
+                        None => println!("Miss (Should not happen)"),
                     }
                 }
             });

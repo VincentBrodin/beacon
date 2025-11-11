@@ -80,7 +80,12 @@ fn main() -> Result<(), Error> {
     let native_options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([400.0, 300.0])
-            .with_min_inner_size([300.0, 220.0]),
+            .with_min_inner_size([300.0, 220.0])
+            .with_title("beacon")
+            .with_decorations(false)
+            .with_resizable(false)
+            .with_transparent(false)
+            .with_window_level(egui::WindowLevel::AlwaysOnTop),
         ..Default::default()
     };
     eframe::run_native(

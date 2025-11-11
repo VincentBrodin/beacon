@@ -1,4 +1,12 @@
-use std::{fmt::Display, fs, io, path::Path, str::FromStr};
+use std::{
+    fmt::Display,
+    fs::{self},
+    io::{self},
+    os::unix::process::CommandExt,
+    path::Path,
+    process::Command,
+    str::FromStr,
+};
 
 use ini::Ini;
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
@@ -37,7 +45,7 @@ impl FromStr for Type {
 
 pub struct Desktop {
     pub name: String,
-    pub chars: Vec<char>,
+    pub boxed_chars: Box<[char]>,
     pub entry_type: Type,
     pub no_display: bool,
 }
@@ -77,31 +85,52 @@ impl Desktop {
 
         Some(Self {
             name,
-            chars,
+            boxed_chars: chars.into_boxed_slice(),
             entry_type: app_type,
             no_display,
         })
     }
 
-    pub fn load_from_directory<P: AsRef<Path>>(path: P) -> io::Result<Vec<Self>> {
-        let dir_entries: Vec<_> = fs::read_dir(path)?.filter_map(|entry| entry.ok()).collect();
-        Ok(dir_entries
-            .par_iter()
-            .filter_map(|entry| Self::load_from_file(entry.path()))
-            .filter(|app| !app.no_display)
-            .collect())
-    }
-
+    /// Runs the operation for each desktop entry in the given path.
     pub fn for_each_in_directory<P: AsRef<Path>, OP: Fn(Self) + Sync + Send>(
-        path: P,
+        directory_path: P,
         op: OP,
     ) -> io::Result<()> {
-        let dir_entries: Vec<_> = fs::read_dir(path)?.filter_map(|entry| entry.ok()).collect();
+        let dir_entries: Vec<_> = fs::read_dir(directory_path)?
+            .filter_map(|entry| entry.ok())
+            .collect();
         dir_entries
             .par_iter()
             .filter_map(|entry| Self::load_from_file(entry.path()))
             .filter(|app| !app.no_display)
             .for_each(op);
+        Ok(())
+    }
+
+    /// Starts the program
+    pub fn start(&self) -> io::Result<()> {
+        match &self.entry_type {
+            Type::Application(exec) => {
+                if let Some(exec) = exec {
+                    println!("Starting {} with {}", self.name, exec);
+                    (unsafe {
+                        Command::new("sh")
+                            .arg("-c")
+                            .arg(exec)
+                            .pre_exec(|| {
+                                libc::setsid();
+                                Ok(())
+                            })
+                            .spawn()
+                    })?;
+                } else {
+                    println!("{} is missing exec command", self.name);
+                    return Ok(());
+                }
+            }
+            Type::Link(link) => println!("Opening {}", link),
+            Type::Directory => todo!(),
+        }
         Ok(())
     }
 }

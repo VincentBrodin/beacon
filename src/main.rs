@@ -1,17 +1,17 @@
-use std::{cmp, env, io, sync::Arc, time::Instant};
+use std::{io, sync::Arc, time::Instant};
 
-use memory_stats::memory_stats;
-use nucleo::{
-    Config, Nucleo,
-    pattern::{CaseMatching, Normalization},
-};
-use pretty_bytes::converter::convert;
+use nucleo::{Config, Nucleo};
 use thiserror::Error;
 
-use crate::{app::App, desktop::Desktop};
+use crate::{app::App, config::config_dir, desktop::Desktop};
 
 mod app;
+mod config;
 mod desktop;
+mod history;
+
+pub const APP_NAME: &str = "beacon";
+pub const HISTORY: &str = "history.json";
 
 #[derive(Error, Debug)]
 enum Error {
@@ -21,61 +21,32 @@ enum Error {
     IO(#[from] io::Error),
     #[error("Failed to parse ini: {0}")]
     Ini(#[from] ini::ParseError),
+    #[error("History failed: {0}")]
+    History(#[from] history::Error),
+    #[error("Failed to get config directory")]
+    ConfigDirectory,
 }
 
 fn main() -> Result<(), Error> {
-    let mut args = env::args();
-    let _ = args.next();
-    let search_str = match args.next() {
-        Some(val) => val,
-        None => String::from(""),
-    };
-
-    // For future use
-    let notify = Arc::new(|| {});
-
-    let config = Config::DEFAULT;
-    let mut nucleo: Nucleo<Desktop> = Nucleo::new(config, notify, None, 1);
-
+    // Setup nucleo
     let mut now = Instant::now();
+    let notify = Arc::new(|| {});
+    let config = Config::DEFAULT;
+    let nucleo: Nucleo<Desktop> = Nucleo::new(config, notify, None, 1);
     let injector = nucleo.injector();
     Desktop::for_each_in_directory("/usr/share/applications", |desktop| {
         injector.push(desktop, |desktop, column| {
-            column[0] = nucleo::Utf32String::Unicode(desktop.chars.clone().into_boxed_slice());
+            column[0] = nucleo::Utf32String::Unicode(desktop.boxed_chars.clone());
         });
     })?;
     let mut duration = now.elapsed();
     println!("Took {:?} to inject apps", duration);
 
-    // let searcher = Searcher::new(apps, config);
+    // Load history
     now = Instant::now();
-    nucleo.pattern.reparse(
-        0,
-        &search_str,
-        CaseMatching::Ignore,
-        Normalization::Smart,
-        false,
-    );
-    nucleo.tick(10);
-    let snapshot = nucleo.snapshot();
+    let history = history::load_from_file(config_dir()?.join(HISTORY))?;
     duration = now.elapsed();
-    println!("Matched and sorted for {} in {:?}", search_str, duration);
-
-    for item in snapshot.matched_items(0..cmp::min(5, snapshot.matched_item_count())) {
-        println!("{}", item.data.name);
-    }
-    if let Some(usage) = memory_stats() {
-        println!(
-            "Current physical memory usage: {}",
-            convert(usage.physical_mem as f64)
-        );
-        println!(
-            "Current virtual memory usage: {}",
-            convert(usage.virtual_mem as f64)
-        );
-    } else {
-        println!("Couldn't get the current memory usage :(");
-    }
+    println!("Took {:?} to load history", duration);
 
     let native_options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
@@ -91,7 +62,7 @@ fn main() -> Result<(), Error> {
     eframe::run_native(
         "eframe template",
         native_options,
-        Box::new(|_| Ok(Box::new(App::new(nucleo)))),
+        Box::new(|_| Ok(Box::new(App::new(nucleo, history)))),
     )?;
     Ok(())
 }

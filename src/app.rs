@@ -19,7 +19,7 @@ pub struct App {
     history: HashMap<String, usize>,
     /// When this is set to true, the window will close the next frame
     close: bool,
-    list: Vec<String>,
+    list: Vec<(String, usize)>,
 }
 
 impl App {
@@ -58,7 +58,8 @@ impl App {
 
     fn select(&mut self) {
         let snapshot = self.nucleo.snapshot();
-        let item = snapshot.get_matched_item(self.selected as u32);
+        let index = self.list[self.selected].1 as u32;
+        let item = snapshot.get_matched_item(index);
         if let Some(item) = item {
             let count = *self.history.get(&item.data.name).unwrap_or(&0) + 1;
             self.history.insert(item.data.name.clone(), count);
@@ -97,7 +98,7 @@ impl App {
                     true => *count,
                     false => matched_count - index + (*count * 5),
                 };
-                (name, value)
+                (name, value, index)
             })
             .collect();
 
@@ -105,7 +106,7 @@ impl App {
         self.list = sorted_items
             .iter()
             .take(max_count)
-            .map(|(item, _)| item.to_string())
+            .map(|(item, _, index)| (item.to_string(), *index))
             .collect();
         let duration = now.elapsed();
         println!("Took {:?} to update list", duration);
@@ -161,7 +162,7 @@ impl eframe::App for App {
                 .auto_shrink([false, true])
                 .show(ui, |ui| {
                     for (i, item) in self.list.as_slice().iter().enumerate() {
-                        let lable = ui.label(item);
+                        let lable = ui.label(&item.0);
                         if i == self.selected {
                             lable.highlight().scroll_to_me(Some(Align::BOTTOM));
                         }

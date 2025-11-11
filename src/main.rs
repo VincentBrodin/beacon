@@ -3,7 +3,7 @@ use std::{io, sync::Arc, time::Instant};
 use nucleo::{Config, Nucleo};
 use thiserror::Error;
 
-use crate::{app::App, config::config_dir, desktop::Desktop};
+use crate::{app::App, desktop::Desktop};
 
 mod app;
 mod config;
@@ -11,7 +11,6 @@ mod desktop;
 mod history;
 
 pub const APP_NAME: &str = "beacon";
-pub const HISTORY: &str = "history.json";
 
 #[derive(Error, Debug)]
 enum Error {
@@ -21,8 +20,8 @@ enum Error {
     IO(#[from] io::Error),
     #[error("Failed to parse ini: {0}")]
     Ini(#[from] ini::ParseError),
-    #[error("History failed: {0}")]
-    History(#[from] history::Error),
+    #[error("Serde failed: {0}")]
+    Serde(#[from] serde_json::Error),
     #[error("Failed to get config directory")]
     ConfigDirectory,
 }
@@ -44,7 +43,7 @@ fn main() -> Result<(), Error> {
 
     // Load history
     now = Instant::now();
-    let history = history::load_from_file(config_dir()?.join(HISTORY))?;
+    let history = history::load_from_file()?;
     duration = now.elapsed();
     println!("Took {:?} to load history", duration);
 

@@ -1,18 +1,26 @@
-use std::{fmt::Display, fs, io, path::Path, str::FromStr};
+use std::{
+    fmt::Display,
+    fs::{self},
+    io::{self},
+    os::unix::process::CommandExt,
+    path::Path,
+    process::Command,
+    str::FromStr,
+};
 
 use ini::Ini;
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Type {
-    Application,
+    Application(Option<String>),
     Link(String),
     Directory,
 }
 impl Display for Type {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Type::Application => f.write_str("Application"),
+            Type::Application(_) => f.write_str("Application"),
             Type::Link(_) => f.write_str("Link"),
             Type::Directory => f.write_str("Directory"),
         }
@@ -27,7 +35,7 @@ impl FromStr for Type {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "Application" => Ok(Type::Application),
+            "Application" => Ok(Type::Application(None)),
             "Link" => Ok(Type::Link(String::from(""))),
             "Directory" => Ok(Type::Directory),
             _ => Err(ParseTypeError),
@@ -37,8 +45,8 @@ impl FromStr for Type {
 
 pub struct Desktop {
     pub name: String,
-    pub chars: Vec<char>,
-    pub app_type: Type,
+    pub boxed_chars: Box<[char]>,
+    pub entry_type: Type,
     pub no_display: bool,
 }
 
@@ -59,9 +67,15 @@ impl Desktop {
         let name = desktop_entry.get("Name")?.to_string();
         let chars: Vec<char> = name.chars().collect();
         let mut app_type = Type::from_str(desktop_entry.get("Type")?).ok()?;
-        if app_type == Type::Link(String::from("")) {
-            let link = desktop_entry.get("Name")?.to_string();
-            app_type = Type::Link(link);
+        match app_type {
+            Type::Application(_) => {
+                app_type = Type::Application(desktop_entry.get("Exec").map(|val| val.to_string()));
+            }
+            Type::Link(_) => {
+                let link = desktop_entry.get("Name")?.to_string();
+                app_type = Type::Link(link);
+            }
+            Type::Directory => todo!(),
         }
         let no_display: bool = desktop_entry
             .get("NoDisplay")
@@ -71,31 +85,52 @@ impl Desktop {
 
         Some(Self {
             name,
-            chars,
-            app_type,
+            boxed_chars: chars.into_boxed_slice(),
+            entry_type: app_type,
             no_display,
         })
     }
 
-    pub fn load_from_directory<P: AsRef<Path>>(path: P) -> io::Result<Vec<Self>> {
-        let dir_entries: Vec<_> = fs::read_dir(path)?.filter_map(|entry| entry.ok()).collect();
-        Ok(dir_entries
-            .par_iter()
-            .filter_map(|entry| Self::load_from_file(entry.path()))
-            .filter(|app| !app.no_display)
-            .collect())
-    }
-
+    /// Runs the operation for each desktop entry in the given path.
     pub fn for_each_in_directory<P: AsRef<Path>, OP: Fn(Self) + Sync + Send>(
-        path: P,
+        directory_path: P,
         op: OP,
     ) -> io::Result<()> {
-        let dir_entries: Vec<_> = fs::read_dir(path)?.filter_map(|entry| entry.ok()).collect();
+        let dir_entries: Vec<_> = fs::read_dir(directory_path)?
+            .filter_map(|entry| entry.ok())
+            .collect();
         dir_entries
             .par_iter()
             .filter_map(|entry| Self::load_from_file(entry.path()))
             .filter(|app| !app.no_display)
             .for_each(op);
+        Ok(())
+    }
+
+    /// Starts the program
+    pub fn start(&self) -> io::Result<()> {
+        match &self.entry_type {
+            Type::Application(exec) => {
+                if let Some(exec) = exec {
+                    println!("Starting {} with {}", self.name, exec);
+                    (unsafe {
+                        Command::new("sh")
+                            .arg("-c")
+                            .arg(exec)
+                            .pre_exec(|| {
+                                libc::setsid();
+                                Ok(())
+                            })
+                            .spawn()
+                    })?;
+                } else {
+                    println!("{} is missing exec command", self.name);
+                    return Ok(());
+                }
+            }
+            Type::Link(link) => println!("Opening {}", link),
+            Type::Directory => todo!(),
+        }
         Ok(())
     }
 }
